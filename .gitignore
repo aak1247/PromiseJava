@@ -1,3 +1,4 @@
 #intellij idea
 /target
 *.iml
+.idea/
