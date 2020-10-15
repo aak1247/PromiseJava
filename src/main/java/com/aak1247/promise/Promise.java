@@ -3,73 +3,51 @@ package com.aak1247.promise;
 
 import com.aak1247.promise.func.*;
 
-import java.lang.reflect.Constructor;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Callable;
+import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Future;
 
-public class Promise<I, R, T extends Throwable> extends StatusAware implements IPromise<I, R, T> {
+public class Promise<I, R, T extends Exception> implements IPromise<I, R, T> {
     private final CompletableFuture<R> valueFuture = new CompletableFuture<>();
-    private final List<Promise<R, ?, ?>> resolverPromises = new LinkedList<>();
-    private final Map<Class<T>, Promise<T, ?, ?>> catcherPromises = new HashMap<>();
+    private final Queue<Promise<R, ?, ?>> resolverPromises = new ConcurrentLinkedQueue<Promise<R, ?, ?>>();
+    private final Map<Class<T>, Promise<T, ?, ?>> catcherPromises = new ConcurrentHashMap<>();
     private final PromiseConfig promiseConfig = new PromiseConfig();
-    private I input;
-    private PromiseStatus status;
-    Rejector<R, T> rejector = (o) -> {
-        Throwable e = null;
-        Class<T> expClass = null;
-        try {
-            expClass = (Class<T>) this.rejector.getClass().getGenericInterfaces()[1];
-            Constructor<T> constructor = expClass.getConstructor((Class) this.rejector.getClass().getGenericInterfaces()[0]);
-            e = expClass.newInstance();
-        } catch (IllegalAccessException | InstantiationException | NoSuchMethodException e1) {
-            e = new RuntimeException(e1);
-        } finally {
-            try {
-                this.onRejected(e);
-            } catch (Throwable throwable) {
-                throwable.printStackTrace();
-                if (expClass.isInstance(e)) {
-                    throw (T) throwable;
-                }
-            }
-        }
+    private final DataWrapper<I> input = new DataWrapper<>();
+    ResolverFunction<R> resolver = (r) -> {
+        this.valueFuture.complete(r);
     };
-    ResolverFunction<R, T> resolver = (object) -> {
-        this.valueFuture.complete(object);
-        this.onResolved();
-    };
+    Rejector<T> rejector = this::setReason;
     private T reason;
-    private Callable<R> job;
+    private PromiseStatus status;
+    private Producer<R> job;
 
     /**
      * testing only
      */
-    public Promise() {
-        promiseConfig.getConfig().publishPromise(this);
+    private Promise() {
     }
 
     /**
      * @param promiseInterface function that uses resolver and rejector to create a promise
      */
-    public Promise(PromiseInterface<R, R, T> promiseInterface) {
-        this.onCreated();
+    public Promise(PromiseInterface<R, T> promiseInterface) {
         this.job = () -> {
             promiseInterface.handle(resolver, rejector);
             return this.valueFuture.get();
         };
-        promiseConfig.getConfig().publishPromise(this);
+        promiseConfig.getPromiseScheduler().publishPromise(this);
     }
 
-    public static <I1, R1, T1 extends Throwable> Promise<I1, R1, T1> resolve(Object data) {
+    public static <I1, R1, T1 extends Exception> Promise<I1, R1, T1> resolve(R1 data) {
         if (data instanceof Promise) {
-            return (Promise<I1, R1, T1>) data;
+            return (Promise) data;
         } else {
-            return new Promise<I1, R1, T1>();
+            return new Promise<>(((resolver1, rejector1) -> {
+                resolver1.resolve(data);
+            }));
         }
     }
 
@@ -77,7 +55,7 @@ public class Promise<I, R, T extends Throwable> extends StatusAware implements I
      * @param promises
      * @return
      */
-    public static Promise<?, ?, ? extends Throwable> race(Promise<?, ?, ? extends Throwable>... promises) {
+    public static Promise<?, ?, ? extends Exception> race(Promise<?, ?, ? extends Throwable>... promises) {
         return new Promise<>();
     }
 
@@ -85,35 +63,86 @@ public class Promise<I, R, T extends Throwable> extends StatusAware implements I
      * @param promises
      * @return
      */
-    public static Promise<?, ?, ? extends Throwable> all(Promise<?, ?, ? extends Throwable>... promises) {
+    public static Promise<?, ?, ? extends Exception> all(Promise<?, ?, ? extends Throwable>... promises) {
         return new Promise<>();
     }
 
     @Override
-    public <R1, T1 extends Throwable> Promise<R, R1, T1> then(Resolver<R, R1, T1> resolver) {
-        Promise promise = new Promise((resolverF, rejectorF) -> {
-            try {
-                resolverF.resolve(this.valueFuture.get());
-            } catch (Throwable throwable) {
-                throwable.printStackTrace();
-            }
+    public <R1, T1 extends Exception> Promise<R, R1, T1> then(Resolver<R, R1, T1> resolver) {
+        Promise<R, R1, T1> promise = new Promise<>();
+        promise.setJob(() -> {
+            R1 res = resolver.resolve(promise.input.getData());
+            promise.valueFuture.complete(res);
+            return res;
         });
-        this.resolverPromises.add(promise);
+
+        if (this.status == null || PromiseStatus.PENDING.equals(this.status)) {
+            this.resolverPromises.add(promise);
+        } else if (this.status.equals(PromiseStatus.RESOLVED)) {
+            PromiseConsumer.handlePromiseResolved(promise, this);
+        } else if (this.status.equals(PromiseStatus.REJECTED)) {
+            PromiseConsumer.rejectResolver(promise, this.getReason());
+        }
         return promise;
     }
 
     @Override
-    public <R1, T1 extends Throwable> Promise<R, R1, T1> then(Resolver<R, R1, T1> resolver, Catcher<T, R1> catcher) {
-        return null;
+    public <R1, T1 extends Exception> Promise<R, R1, T1> then(Resolver<R, R1, T1> resolver, Catcher<T, R1> catcher, Class<T> tClass) {
+        // resolver promise
+        Promise<R, R1, T1> promise = new Promise<>();
+        promise.setJob(() -> {
+            R1 res = resolver.resolve(promise.input.getData());
+            promise.valueFuture.complete(res);
+            return res;
+        });
+        // error handler for current promise
+        Promise<T, R1, T1> catcherPromise = new Promise<>();
+        catcherPromise.setJob(() -> {
+            R1 res = catcher.handle(this.getReason());
+            catcherPromise.valueFuture.complete(res);
+            return res;
+        });
+
+        if (this.status == null || this.status.equals(PromiseStatus.PENDING)) {
+            this.resolverPromises.add(promise);
+            this.catcherPromises.putIfAbsent(tClass, catcherPromise);
+        } else if (this.status.equals(PromiseStatus.RESOLVED)) {
+            PromiseConsumer.handlePromiseResolved(promise, this);
+        } else if (this.status.equals(PromiseStatus.REJECTED)) {
+            this.resolverPromises.add(promise);
+            this.catcherPromises.putIfAbsent(tClass, catcherPromise);
+            PromiseConsumer.rejectResolver(this, this.getReason());
+        }
+        return promise;
     }
 
     @Override
-    public <R1, R2, T2 extends Throwable> Promise<R1, R2, T2> onCatch(T t) {
-        return null;
+    public <R1, T1 extends Exception> Promise<T, R1, T1> onCatch(Catcher<T, R1> catcher, Class<T> tClass) {
+        Promise<T, R1, T1> promise = new Promise();
+        promise.setJob(() -> {
+            R1 res = catcher.handle(this.getReason());
+            promise.valueFuture.complete(res);
+            return res;
+        });
+        this.catcherPromises.putIfAbsent(tClass, promise);
+        if (this.status == null || this.status.equals(PromiseStatus.PENDING)) {
+            // do nothing
+        } else if (this.status.equals(PromiseStatus.RESOLVED)) {
+            promise.setJob(() -> null);
+        } else if (this.status.equals(PromiseStatus.REJECTED)) {
+            // can be catch more than once
+            PromiseConsumer.rejectResolver(this, this.getReason());
+        }
+        return promise;
+
+    }
+
+    public <R1, T1 extends Exception> Promise<T, R1, T1> onCatch(Catcher<T, R1> catcher) {
+        return onCatch(catcher, (Class<T>) Exception.class);
     }
 
     @Override
-    public <R1, T1 extends Throwable> IPromise<R1, ?, T1> anyway(Resolver<?, R1, T1> resolver) {
+    public <R1, T1 extends Exception> IPromise<R1, ?, T1> anyway(Resolver<?, R1, T1> resolver) {
         return null;
     }
 
@@ -122,6 +151,19 @@ public class Promise<I, R, T extends Throwable> extends StatusAware implements I
         return this.valueFuture;
     }
 
+    @Override
+    public void cancel() {
+        this.catcherPromises.clear();
+        this.resolverPromises.clear();
+    }
+
+    public DataWrapper<I> getInput() {
+        return input;
+    }
+
+    public void setInputData(I inputData) {
+        this.input.setData(inputData);
+    }
 
     public PromiseStatus getStatus() {
         return status;
@@ -139,35 +181,23 @@ public class Promise<I, R, T extends Throwable> extends StatusAware implements I
         this.reason = reason;
     }
 
-    Callable<R> getJob() {
+    Producer<R> getJob() {
         return job;
     }
 
-    void setJob(Callable<R> job) {
+    void setJob(Producer<R> job) {
         this.job = job;
     }
 
-    @Override
-    void onCreated() {
-        this.status = PromiseStatus.PENDING;
+    CompletableFuture<R> getValueFuture() {
+        return valueFuture;
     }
 
-    @Override
-    void onResolved() {
-        this.status = PromiseStatus.RESOLVED;
-        // todo: 传递数据
-        this.resolverPromises.forEach(resolverPromise -> promiseConfig.getConfig().publishPromise(resolverPromise));
+    Queue<Promise<R, ?, ?>> getResolverPromises() {
+        return resolverPromises;
     }
 
-    @Override
-    void onRejected(Throwable throwable) throws Throwable {
-        this.status = PromiseStatus.REJECTED;
-        //todo: 传递数据
-        Promise catcherPromise = this.catcherPromises.get(throwable.getClass());
-        if (catcherPromise != null) {
-            promiseConfig.getConfig().publishPromise(catcherPromise);
-        } else {
-            throw throwable;
-        }
+    Map<Class<T>, Promise<T, ?, ?>> getCatcherPromises() {
+        return catcherPromises;
     }
 }

@@ -31,13 +31,25 @@ public class Test {
 //                },
 //                e->((Throwable)e).printStackTrace()
 //        );
-        Promise<Integer, Integer, RuntimeException> promise = new Promise<>((resolver, rejector) -> resolver.resolve(1));
-        promise.then((i) -> {
-            System.out.println(i);
-            return "0";
-        }).then(s -> {
-            System.out.println(s);
-            return -1;
-        });
+
+
+        for (int t = 0; t < 100; ++t) {
+            int m = t;
+            Promise<Integer, Integer, RuntimeException> promise = new Promise<>((resolver, rejector) -> resolver.resolve(m));
+            promise.then((i) -> {
+                System.out.println(i);
+                return "" + i;
+            }).then(s -> {
+                System.out.println(s);
+                Thread.sleep(1);
+                throw new Exception(s);
+            }).onCatch(e -> {
+                return "fuck" + e.getMessage();
+            }, Exception.class).then(s -> {
+                System.out.println("last:" + s);
+                return null;
+            });
+        }
+        Thread.sleep(1000000000);
     }
 }

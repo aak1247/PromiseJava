@@ -12,20 +12,21 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadFactory;
 
 public class PromiseScheduler {
+    private final int workerNum;
     ExecutorService executor;
     Disruptor<PromiseEvent> disruptor;
     RingBuffer<PromiseEvent> buffer;
     List<BatchEventProcessor<PromiseEvent>> processors;
     List<EventHandler> eventHandlers = new LinkedList<>();
-    private int worker_num;
 
     public PromiseScheduler() {
-        this(3, 16);
+        this(3, 65536);
     }
 
     public PromiseScheduler(int workerNum, int bufferSize) {
+        this.workerNum = workerNum;
         ThreadFactory threadFactory = DaemonThreadFactory.INSTANCE;
-        WaitStrategy waitStrategy = new BusySpinWaitStrategy();
+        WaitStrategy waitStrategy = new SleepingWaitStrategy();
         this.disruptor
                 = new Disruptor<>(
                 PromiseEvent.PROMISE_EVENT_FACTORY,
@@ -33,11 +34,10 @@ public class PromiseScheduler {
                 threadFactory,
                 ProducerType.SINGLE,
                 waitStrategy);
-//        this.disruptor.handleEventsWith((e, seq, isEnd) -> {
-//            System.out.println(seq + e.toString() + e.getBefore() + e.getAfter());
-//        });
         PromiseConsumer consumer = new PromiseConsumer();
+        PromiseExceptionHandler exceptionHandler = new PromiseExceptionHandler();
         this.disruptor.handleEventsWith(consumer);
+        this.disruptor.setDefaultExceptionHandler(exceptionHandler);
         this.buffer = disruptor.start();
     }
 
@@ -46,8 +46,12 @@ public class PromiseScheduler {
     }
 
     public synchronized void publishPromise(Promise promise) {
+        publishPromise(promise, PromiseStatus.PENDING);
+    }
+
+    public synchronized void publishPromise(Promise promise, PromiseStatus after) {
         if (promise != null) {
-            this.buffer.publishEvent(PromiseEvent.TRANSLATOR, promise, PromiseStatus.PENDING);
+            this.buffer.publishEvent(PromiseEvent.TRANSLATOR, promise, after);
         }
     }
 }
