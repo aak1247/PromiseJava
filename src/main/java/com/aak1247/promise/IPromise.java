@@ -46,7 +46,7 @@ public interface IPromise<I, R, T extends Exception> {
     /**
      *
      */
-    <R1, T1 extends Exception> IPromise<R1, ?, T1> anyway(Resolver<?, R1, T1> resolver);
+    <R1, T1 extends Exception> IPromise<?, R1, T1> anyway(Resolver<Object, R1, T1> resolver);
 
     /**
      * @return

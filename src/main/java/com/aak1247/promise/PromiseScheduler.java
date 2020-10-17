@@ -8,32 +8,26 @@ import com.lmax.disruptor.util.DaemonThreadFactory;
 
 import java.util.LinkedList;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 
 public class PromiseScheduler {
-    private final int workerNum;
-    ExecutorService executor;
     Disruptor<PromiseEvent> disruptor;
     RingBuffer<PromiseEvent> buffer;
     List<BatchEventProcessor<PromiseEvent>> processors;
-    List<EventHandler> eventHandlers = new LinkedList<>();
+    List<EventHandler<Promise<?, ?, ?>>> eventHandlers = new LinkedList<>();
 
     public PromiseScheduler() {
-        this(3, 65536);
+        this(10, 65536);
     }
 
     public PromiseScheduler(int workerNum, int bufferSize) {
-        this.workerNum = workerNum;
         ThreadFactory threadFactory = DaemonThreadFactory.INSTANCE;
+        Executor executor = Executors.newFixedThreadPool(workerNum, threadFactory);
         WaitStrategy waitStrategy = new SleepingWaitStrategy();
         this.disruptor
-                = new Disruptor<>(
-                PromiseEvent.PROMISE_EVENT_FACTORY,
-                bufferSize,
-                threadFactory,
-                ProducerType.SINGLE,
-                waitStrategy);
+                = new Disruptor<>(PromiseEvent.PROMISE_EVENT_FACTORY, bufferSize, executor, ProducerType.MULTI, waitStrategy);
         PromiseConsumer consumer = new PromiseConsumer();
         PromiseExceptionHandler exceptionHandler = new PromiseExceptionHandler();
         this.disruptor.handleEventsWith(consumer);
@@ -41,17 +35,23 @@ public class PromiseScheduler {
         this.buffer = disruptor.start();
     }
 
-    public void registerEventHandler(EventHandler eventHandler) {
+    void registerEventHandler(EventHandler eventHandler) {
         eventHandlers.add(eventHandler);
     }
 
-    public synchronized void publishPromise(Promise promise) {
-        publishPromise(promise, PromiseStatus.PENDING);
+    synchronized void publishPromise(Promise promise) {
+        publishPromise(promise, promise.getStatus());
     }
 
-    public synchronized void publishPromise(Promise promise, PromiseStatus after) {
+    synchronized void publishPromise(Promise promise, PromiseStatus after) {
         if (promise != null) {
             this.buffer.publishEvent(PromiseEvent.TRANSLATOR, promise, after);
+        }
+    }
+
+    synchronized void publishPromise(Promise promise, PromiseStatus after, boolean repeated) {
+        if (promise != null) {
+            this.buffer.publishEvent(PromiseEvent.TRANSLATOR_REPEATED, promise, after, repeated);
         }
     }
 }

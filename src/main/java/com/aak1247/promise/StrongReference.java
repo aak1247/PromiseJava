@@ -1,12 +1,12 @@
 package com.aak1247.promise;
 
-public class DataWrapper<T> {
+public class StrongReference<T> {
     private T data;
 
-    public DataWrapper() {
+    public StrongReference() {
     }
 
-    public DataWrapper(T data) {
+    public StrongReference(T data) {
         this.data = data;
     }
 
