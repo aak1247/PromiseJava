@@ -54,7 +54,6 @@ public class PromiseEvent {
     @Override
     public boolean equals(Object o) {
         return !this.repeated
-                && o != null
                 && o instanceof PromiseEvent
                 && !((PromiseEvent) o).repeated
                 && ((PromiseEvent) o).getAfter().equals(after)

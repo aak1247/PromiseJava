@@ -31,7 +31,7 @@ public class PromiseConsumer implements EventHandler<PromiseEvent> {
      */
     @Override
     public void onEvent(PromiseEvent promiseEvent, long l, boolean b) throws Exception {
-        System.out.println(promiseEvent.getBefore() + ", " + promiseEvent.getPromise().toString() + ", " + promiseEvent.getAfter());
+//        System.out.println(promiseEvent.getBefore() + ", " + promiseEvent.getPromise().toString() + ", " + promiseEvent.getAfter());
         Promise promise = promiseEvent.getPromise();
         if (promise == null) return;
         switch (promiseEvent.getAfter()) {
@@ -39,8 +39,10 @@ public class PromiseConsumer implements EventHandler<PromiseEvent> {
             case PENDING:
                 try {
                     // run current job and publish resolved event
-                    promise.getJob().run();
-                    System.out.println("after run " + promise.getStatus());
+                    if (promise.getJob() != null) {
+                        promise.getJob().run();
+                    }
+//                    System.out.println("after run " + promise.getStatus());
                     if (PromiseStatus.RESOLVED.equals(promise.getStatus())) {
                         PromiseConfig.getInstance().getPromiseScheduler().publishPromise(promise, PromiseStatus.RESOLVED);
                     }

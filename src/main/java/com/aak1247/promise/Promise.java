@@ -252,6 +252,7 @@ public class Promise<I, R, T extends Exception> implements IPromise<I, R, T> {
      */
     @Override
     public void cancel() {
+        this.job = null;
         this.catcherPromises.clear();
         this.resolverPromises.clear();
     }

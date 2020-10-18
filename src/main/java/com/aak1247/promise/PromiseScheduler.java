@@ -19,7 +19,7 @@ public class PromiseScheduler {
     List<EventHandler<Promise<?, ?, ?>>> eventHandlers = new LinkedList<>();
 
     public PromiseScheduler() {
-        this(10, 65536);
+        this(2, 65536);
     }
 
     public PromiseScheduler(int workerNum, int bufferSize) {
@@ -33,6 +33,10 @@ public class PromiseScheduler {
         this.disruptor.handleEventsWith(consumer);
         this.disruptor.setDefaultExceptionHandler(exceptionHandler);
         this.buffer = disruptor.start();
+    }
+
+    public void stop() {
+        this.disruptor.shutdown();
     }
 
     void registerEventHandler(EventHandler eventHandler) {
