@@ -1,6 +1,6 @@
 package com.aak1247.promise;
 
-public enum Status {
+public enum PromiseStatus {
     PENDING,
     RESOLVED,
     REJECTED

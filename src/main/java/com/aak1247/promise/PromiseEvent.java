@@ -1,26 +1,45 @@
 package com.aak1247.promise;
 
 import com.lmax.disruptor.EventFactory;
+import com.lmax.disruptor.EventTranslatorThreeArg;
 import com.lmax.disruptor.EventTranslatorTwoArg;
 
-public class PromiseEvent {
-    private Status before;
-    private Status after;
-    private Promise promise;
+import java.util.Objects;
 
-    public Status getBefore() {
+public class PromiseEvent {
+    public static final EventFactory<PromiseEvent> PROMISE_EVENT_FACTORY = PromiseEvent::new;
+    public static final EventTranslatorTwoArg TRANSLATOR = (EventTranslatorTwoArg<PromiseEvent, Promise, PromiseStatus>) (event, sequence, promise, after) -> {
+        event.setBefore(promise.getStatus());
+        if (promise != null) {
+            promise.setStatus(after);
+        }
+        event.setAfter(after);
+        event.setPromise(promise);
+    };
+
+    public static final EventTranslatorThreeArg TRANSLATOR_REPEATED = (EventTranslatorThreeArg<PromiseEvent, Promise, PromiseStatus, Boolean>) (event, sequence, promise, after, repeated) -> {
+        TRANSLATOR.translateTo(event, sequence, promise, after);
+        event.repeated = repeated;
+    };
+
+    private PromiseStatus before;
+    private PromiseStatus after;
+    private Promise promise;
+    private boolean repeated;
+
+    public PromiseStatus getBefore() {
         return before;
     }
 
-    public void setBefore(Status before) {
+    public void setBefore(PromiseStatus before) {
         this.before = before;
     }
 
-    public Status getAfter() {
+    public PromiseStatus getAfter() {
         return after;
     }
 
-    public void setAfter(Status after) {
+    public void setAfter(PromiseStatus after) {
         this.after = after;
     }
 
@@ -32,26 +51,18 @@ public class PromiseEvent {
         this.promise = promise;
     }
 
-    public static final EventFactory<PromiseEvent> PROMISE_EVENT_FACTORY = new EventFactory<PromiseEvent>() {
-        @Override
-        public PromiseEvent newInstance() {
-            return new PromiseEvent();
-        }
-    };
-
-    public static final EventTranslatorTwoArg TRANSLATOR = (EventTranslatorTwoArg<PromiseEvent, Promise, Status>) (event, sequence, promise, after) -> {
-        event.setBefore(promise.getStatus());
-        promise.setStatus(after);
-        event.setAfter(after);
-        event.setPromise(promise);
-    };
-
     @Override
     public boolean equals(Object o) {
-        return o != null
+        return !this.repeated
                 && o instanceof PromiseEvent
+                && !((PromiseEvent) o).repeated
                 && ((PromiseEvent) o).getAfter().equals(after)
                 && ((PromiseEvent) o).getBefore().equals(before)
                 && ((PromiseEvent) o).getPromise().equals(promise);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(before, after, promise);
     }
 }
